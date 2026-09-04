@@ -1,0 +1,5 @@
+This repository is a TEMPLATE.
+
+- Not a live brand or storefront
+- Rename branding in app/lib/branding.js before launch
+- Connect a Shopify store with: npx shopify hydrogen link
