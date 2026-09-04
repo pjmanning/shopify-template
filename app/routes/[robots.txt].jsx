@@ -1,48 +1,57 @@
+import {parseGid} from '@shopify/hydrogen';
+
 /**
  * @param {Route.LoaderArgs}
  */
-export function loader({request}) {
+export async function loader({request, context}) {
   const url = new URL(request.url);
-  const body = robotsTxtData({url: url.origin});
+
+  const {shop} = await context.storefront.query(ROBOTS_QUERY);
+
+  const body = robotsTxtData({url, shop});
 
   return new Response(body, {
     status: 200,
     headers: {
       'Content-Type': 'text/plain',
 
-      'Cache-Control': `max-age=${60 * 60 * 24}`,
+      'Cache-Control': `public, max-age=${60 * 60 * 24}`,
     },
   });
 }
 
 /**
- * @param {{url?: string}}
+ * @param {{shop: Shop; url: URL}}
  */
-function robotsTxtData({url}) {
-  const sitemapUrl = url ? `${url}/sitemap.xml` : undefined;
+function robotsTxtData({url, shop}) {
+  const sitemapUrl = `${url.origin}/sitemap.xml`;
 
   return `
 User-agent: *
-${generalDisallowRules({sitemapUrl})}
+${generalDisallowRules({sitemapUrl, shopId: parseGid(shop.id).id})}
 
 # Google adsbot ignores robots.txt unless specifically named!
 User-agent: adsbot-google
-Disallow: /cart
-Disallow: /account
-Disallow: /search
-Allow: /search/
-Disallow: /search/?*
+Disallow: /checkouts/
+Disallow: /checkout
+Disallow: /carts
+Disallow: /orders
+${shopId ? `Disallow: /${shopId}/checkouts` : ''}
+${shopId ? `Disallow: /${shopId}/orders` : ''}
+Disallow: /*?*oseid=*
+Disallow: /*preview_theme_id*
+Disallow: /*preview_script_id*
 
 User-agent: Nutch
 Disallow: /
 
 User-agent: AhrefsBot
 Crawl-delay: 10
-${generalDisallowRules({sitemapUrl})}
+${generalDisallowRules({sitemapUrl, shopId})}
 
 User-agent: AhrefsSiteAudit
 Crawl-delay: 10
-${generalDisallowRules({sitemapUrl})}
+${generalDisallowRules({sitemapUrl, shopId})}
 
 User-agent: MJ12bot
 Crawl-Delay: 10
@@ -54,11 +63,19 @@ Crawl-delay: 1
 
 /**
  * This function generates disallow rules that generally follow what Shopify's
- * Online Store has as defaults for their robots.txt
- * @param {{sitemapUrl?: string}}
+ * Online Store has as draft/prelaunch protection.
+ * @see https://shopify.dev/docs/api/liquid/filters/default_pagination
  */
-function generalDisallowRules({sitemapUrl}) {
-  return `Disallow: /cart
+function generalDisallowRules({shopId, sitemapUrl}) {
+  return `Disallow: /a/downloads/-/*
+Disallow: /admin
+Disallow: /cart
+Disallow: /orders/*
+Disallow: /checkouts/
+Disallow: /checkout
+${shopId ? `Disallow: /${shopId}/checkouts` : ''}
+${shopId ? `Disallow: /${shopId}/orders` : ''}
+Disallow: /carts
 Disallow: /account
 Disallow: /collections/*sort_by*
 Disallow: /*/collections/*sort_by*
@@ -68,19 +85,36 @@ Disallow: /collections/*%2b*
 Disallow: /*/collections/*+*
 Disallow: /*/collections/*%2B*
 Disallow: /*/collections/*%2b*
-Disallow: /*/collections/*filter*&*filter*
+Disallow: */collections/*filter*&*filter*
 Disallow: /blogs/*+*
 Disallow: /blogs/*%2B*
 Disallow: /blogs/*%2b*
 Disallow: /*/blogs/*+*
 Disallow: /*/blogs/*%2B*
 Disallow: /*/blogs/*%2b*
+Disallow: /*?*oseid=*
+Disallow: /*preview_theme_id*
+Disallow: /*preview_script_id*
 Disallow: /policies/
+Disallow: /*/*?*ls=*&ls=*
+Disallow: /*/*?*ls%3D*%3Fls%3D*
+Disallow: /*/*?*ls%3d*%3fls%3d*
 Disallow: /search
 Allow: /search/
 Disallow: /search/?*
+Disallow: /apple-app-site-association
+Disallow: /.well-known/shopify/monorail
 ${sitemapUrl ? `Sitemap: ${sitemapUrl}` : ''}`;
 }
 
+const ROBOTS_QUERY = `#graphql
+  query StoreRobots($country: CountryCode, $language: LanguageCode)
+   @inContext(country: $country, language: $language) {
+    shop {
+      id
+    }
+  }
+`;
+
 /** @typedef {import('./+types/[robots.txt]').Route} Route */
-/** @typedef {ReturnType<typeof useLoaderData<typeof loader>>} LoaderReturnData */
+/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */

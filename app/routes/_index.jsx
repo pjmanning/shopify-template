@@ -1,176 +1,124 @@
 import {Await, useLoaderData, Link} from 'react-router';
 import {Suspense} from 'react';
+import {Image} from '@shopify/hydrogen';
 import {ProductItem} from '~/components/ProductItem';
-import {brand} from '~/lib/branding';
+import {getTemplateConfig} from '~/lib/branding';
 
 /**
  * @type {Route.MetaFunction}
  */
 export const meta = () => {
-  return [{title: `${brand.name} | Home (TEMPLATE)`}];
+  const config = getTemplateConfig();
+  return [{title: config.storeName || 'Hydrogen | Home'}];
 };
 
 /**
  * @param {Route.LoaderArgs} args
  */
 export async function loader(args) {
+  // Start fetching non-critical data without blocking time to first byte
   const deferredData = loadDeferredData(args);
+
+  // Await the critical data required to render initial state of the page
   const criticalData = await loadCriticalData(args);
+
   return {...deferredData, ...criticalData};
 }
 
 /**
+ * Load data necessary for rendering content above the fold. This is the critical data
+ * needed to render the page. If it's unavailable, the whole page should 400 or 500.
  * @param {Route.LoaderArgs}
  */
 async function loadCriticalData({context}) {
   const [{collections}] = await Promise.all([
     context.storefront.query(FEATURED_COLLECTION_QUERY),
+    // Add other queries here, so that they are loaded in parallel
   ]);
 
   return {
-    isShopLinked: Boolean(context.env.PUBLIC_STORE_DOMAIN),
-    featuredCollection: collections.nodes[0] ?? null,
+    featuredCollection: collections.nodes[0],
   };
 }
 
 /**
+ * Load data for rendering content below the fold. This data is deferred and will be
+ * fetched after the initial page load. If it's unavailable, the page should still 200.
+ * Make sure to not throw any errors here, as it will cause the page to throw.
  * @param {Route.LoaderArgs}
  */
 function loadDeferredData({context}) {
-  const featuredProducts = context.storefront
-    .query(FEATURED_PRODUCTS_QUERY)
+  const recommendedProducts = context.storefront
+    .query(RECOMMENDED_PRODUCTS_QUERY)
     .catch((error) => {
+      // Log query errors, but don't throw them so the page can still render
       console.error(error);
       return null;
     });
 
-  return {featuredProducts};
+  return {
+    recommendedProducts,
+  };
 }
 
 export default function Homepage() {
   /** @type {LoaderReturnData} */
   const data = useLoaderData();
-
+  const config = getTemplateConfig();
   return (
     <div className="home">
-      <Hero />
-      <FeaturedProductsStub
-        products={data.featuredProducts}
-        isShopLinked={data.isShopLinked}
-      />
-      <FeaturedCollectionStub collection={data.featuredCollection} />
+      <FeaturedCollection collection={data.featuredCollection} />
+      <RecommendedProducts products={data.recommendedProducts} />
     </div>
-  );
-}
-
-function Hero() {
-  const {hero, name} = brand;
-
-  return (
-    <section className="hero" aria-labelledby="hero-heading">
-      <p className="hero-brand">{name}</p>
-      <h1 id="hero-heading">{hero.headline}</h1>
-      <p className="hero-subhead">{hero.subhead}</p>
-      <div className="hero-actions">
-        <Link className="button-primary" to={hero.ctaHref}>
-          {hero.ctaLabel}
-        </Link>
-        <Link className="button-ghost" to="/cart">
-          Cart stub
-        </Link>
-      </div>
-    </section>
   );
 }
 
 /**
  * @param {{
- *   products: Promise<FeaturedProductsQuery | null>;
- *   isShopLinked: boolean;
+ *   collection: FeaturedCollectionFragment;
  * }}
  */
-function FeaturedProductsStub({products, isShopLinked}) {
+function FeaturedCollection({collection}) {
+  if (!collection) return null;
+  const image = collection?.image;
   return (
-    <section
-      className="featured-products"
-      aria-labelledby="featured-products-heading"
+    <Link
+      className="featured-collection"
+      to={`/collections/${collection.handle}`}
     >
-      <div className="section-heading">
-        <h2 id="featured-products-heading">Featured products</h2>
-        <p>
-          Stub grid —{' '}
-          {isShopLinked
-            ? 'showing products from your linked store.'
-            : 'showing mock.shop demo products until you link a store.'}
-        </p>
-      </div>
-      <Suspense fallback={<div className="stub-grid loading">Loading…</div>}>
-        <Await resolve={products}>
-          {(response) => {
-            const nodes = response?.products?.nodes ?? [];
-            if (!nodes.length) {
-              return (
-                <div className="stub-grid empty">
-                  <StubProductCard title="Product A" price="$00.00" />
-                  <StubProductCard title="Product B" price="$00.00" />
-                  <StubProductCard title="Product C" price="$00.00" />
-                  <StubProductCard title="Product D" price="$00.00" />
-                </div>
-              );
-            }
-            return (
-              <div className="recommended-products-grid">
-                {nodes.map((product) => (
-                  <ProductItem key={product.id} product={product} />
-                ))}
-              </div>
-            );
-          }}
-        </Await>
-      </Suspense>
-    </section>
+      {image && (
+        <div className="featured-collection-image">
+          <Image data={image} sizes="100vw" />
+        </div>
+      )}
+      <h1>{collection.title}</h1>
+    </Link>
   );
 }
 
 /**
- * @param {{collection: FeaturedCollectionFragment | null}}
+ * @param {{
+ *   products: Promise<RecommendedProductsQuery | null>;
+ * }}
  */
-function FeaturedCollectionStub({collection}) {
+function RecommendedProducts({products}) {
   return (
-    <section
-      className="featured-collection-stub"
-      aria-labelledby="featured-collection-heading"
-    >
-      <div className="section-heading">
-        <h2 id="featured-collection-heading">Featured collection</h2>
-        <p>Collection page stub entry point.</p>
-      </div>
-      {collection ? (
-        <Link
-          className="collection-card"
-          to={`/collections/${collection.handle}`}
-        >
-          <span className="collection-card-label">Collection</span>
-          <strong>{collection.title}</strong>
-          <span className="collection-card-cta">View collection →</span>
-        </Link>
-      ) : (
-        <Link className="collection-card" to="/collections">
-          <span className="collection-card-label">Collection</span>
-          <strong>All products</strong>
-          <span className="collection-card-cta">Browse collections →</span>
-        </Link>
-      )}
-    </section>
-  );
-}
-
-function StubProductCard({title, price}) {
-  return (
-    <div className="stub-product-card">
-      <div className="stub-product-image" aria-hidden="true" />
-      <h3>{title}</h3>
-      <p>{price}</p>
+    <div className="recommended-products">
+      <h2>Recommended Products</h2>
+      <Suspense fallback={<div>Loading...</div>}>
+        <Await resolve={products}>
+          {(response) => (
+            <div className="recommended-products-grid">
+              {response
+                ? response.products.nodes.map((product) => (
+                    <ProductItem key={product.id} product={product} />
+                  ))
+                : null}
+            </div>
+          )}
+        </Await>
+      </Suspense>
+      <br />
     </div>
   );
 }
@@ -198,8 +146,8 @@ const FEATURED_COLLECTION_QUERY = `#graphql
   }
 `;
 
-const FEATURED_PRODUCTS_QUERY = `#graphql
-  fragment FeaturedProduct on Product {
+const RECOMMENDED_PRODUCTS_QUERY = `#graphql
+  fragment RecommendedProduct on Product {
     id
     title
     handle
@@ -211,23 +159,23 @@ const FEATURED_PRODUCTS_QUERY = `#graphql
     }
     featuredImage {
       id
-      url
       altText
+      url
       width
       height
     }
   }
-  query FeaturedProducts ($country: CountryCode, $language: LanguageCode)
+  query RecommendedProducts ($country: CountryCode, $language: LanguageCode)
     @inContext(country: $country, language: $language) {
     products(first: 4, sortKey: UPDATED_AT, reverse: true) {
       nodes {
-        ...FeaturedProduct
+        ...RecommendedProduct
       }
     }
   }
 `;
 
-/** @typedef {import('./+types/_index').Route} Route */
 /** @typedef {import('storefrontapi.generated').FeaturedCollectionFragment} FeaturedCollectionFragment */
-/** @typedef {import('storefrontapi.generated').FeaturedProductsQuery} FeaturedProductsQuery */
-/** @typedef {ReturnType<typeof useLoaderData<typeof loader>>} LoaderReturnData */
+/** @typedef {import('storefrontapi.generated').RecommendedProductsQuery} RecommendedProductsQuery */
+/** @typedef {import('./+types/_index').Route} Route */
+/** @typedef {import('@shopify/remix-oxygen').SerializeFrom<typeof loader>} LoaderReturnData */
